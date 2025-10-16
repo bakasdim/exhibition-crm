@@ -550,7 +550,10 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex justify-between items-center">
-            <h1 className="text-xl font-bold text-gray-800">Exhibition CRM</h1>
+            <div className="flex items-center gap-3">
+              <img src="/assets/logo.svg" alt="Logo" className="h-8 w-auto" />
+              <h1 className="text-xl font-bold text-gray-800">Exhibition CRM</h1>
+            </div>
             <div className="flex items-center gap-4">
               {lastSaved && (
                 <div className="flex items-center gap-2 text-sm text-green-600">
