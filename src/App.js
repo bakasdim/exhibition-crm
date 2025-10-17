@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import './App.css';
 
@@ -34,15 +34,8 @@ function App() {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
 
-  // Load contacts when user logs in
-  useEffect(() => {
-    if (currentView === 'dashboard') {
-      loadContacts();
-    }
-  }, [currentView, currentUser]);
-
-  // Load contacts from Supabase
-  const loadContacts = async () => {
+  // Load contacts from Supabase - wrapped in useCallback to avoid dependency issues
+  const loadContacts = useCallback(async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
@@ -59,7 +52,14 @@ function App() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUser]);
+
+  // Load contacts when user logs in
+  useEffect(() => {
+    if (currentView === 'dashboard') {
+      loadContacts();
+    }
+  }, [currentView, loadContacts]);
 
   // Handle login
   const handleLogin = (e) => {
@@ -145,7 +145,7 @@ function App() {
 
     try {
       const fileName = `${contactId}_${Date.now()}.jpg`;
-      const { data, error } = await supabase.storage
+      const { error } = await supabase.storage
         .from('product-photos')
         .upload(fileName, photoFile, {
           contentType: 'image/jpeg'
