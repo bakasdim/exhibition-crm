@@ -22,6 +22,7 @@ export default function ExhibitionCRM() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [filterPriority, setFilterPriority] = useState('all');
+  const [filterSalesperson, setFilterSalesperson] = useState('all');
   const [lastSaved, setLastSaved] = useState(null);
   const [editingContact, setEditingContact] = useState(null);
   
@@ -92,7 +93,15 @@ export default function ExhibitionCRM() {
         showNotification('Please verify your email before logging in.', 'error');
         return;
       }
-      setCurrentUser({ email: session.user.email, id: session.user.id });
+      
+      // Get user role from metadata (default to 'user' if not set)
+      const userRole = session.user.user_metadata?.role || 'user';
+      
+      setCurrentUser({ 
+        email: session.user.email, 
+        id: session.user.id,
+        role: userRole
+      });
     }
   }, [showNotification]);
 
@@ -103,10 +112,17 @@ export default function ExhibitionCRM() {
   // Load contacts from Supabase when user logs in
   const loadContactsFromSupabase = useCallback(async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('contacts')
         .select('*')
         .order('created_at', { ascending: false });
+
+      // If user is not admin, only show their own contacts
+      if (currentUser?.role !== 'admin') {
+        query = query.eq('sales_person', currentUser?.email);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
 
@@ -132,7 +148,7 @@ export default function ExhibitionCRM() {
       console.error('Error loading contacts:', error);
       showNotification('Failed to load contacts from database', 'error');
     }
-  }, [showNotification]);
+  }, [showNotification, currentUser]);
 
   useEffect(() => {
     if (currentUser) {
@@ -161,8 +177,12 @@ export default function ExhibitionCRM() {
       filtered = filtered.filter(contact => contact.priority >= min && contact.priority <= max);
     }
 
+    if (filterSalesperson !== 'all') {
+      filtered = filtered.filter(contact => contact.salesPerson === filterSalesperson);
+    }
+
     setFilteredContacts(filtered);
-  }, [searchTerm, filterType, filterPriority, contacts]);
+  }, [searchTerm, filterType, filterPriority, filterSalesperson, contacts]);
 
   useEffect(() => {
     applyFilters();
@@ -220,7 +240,14 @@ export default function ExhibitionCRM() {
           return;
         }
 
-        setCurrentUser({ email: data.user.email, id: data.user.id });
+        // Get user role from metadata (default to 'user' if not set)
+        const userRole = data.user.user_metadata?.role || 'user';
+
+        setCurrentUser({ 
+          email: data.user.email, 
+          id: data.user.id,
+          role: userRole
+        });
         showNotification('Login successful!', 'success');
       }
     } catch (error) {
@@ -763,7 +790,14 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
                   <span>Synced {lastSaved.toLocaleTimeString()}</span>
                 </div>
               )}
-              <span className="text-sm text-gray-600">{currentUser.email}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">{currentUser.email}</span>
+                {currentUser.role === 'admin' && (
+                  <span className="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded font-semibold">
+                    ADMIN
+                  </span>
+                )}
+              </div>
               <button
                 onClick={handleLogout}
                 className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition"
@@ -816,17 +850,19 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
               <User className="w-4 h-4" />
               Saved Contacts ({contacts.length})
             </button>
-            <button
-              onClick={() => setActivePage('statistics')}
-              className={`flex items-center gap-2 px-6 py-3 font-medium border-b-2 transition ${
-                activePage === 'statistics'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              Statistics
-            </button>
+            {currentUser.role === 'admin' && (
+              <button
+                onClick={() => setActivePage('statistics')}
+                className={`flex items-center gap-2 px-6 py-3 font-medium border-b-2 transition ${
+                  activePage === 'statistics'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-600 hover:text-gray-800'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" />
+                Statistics
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -886,7 +922,12 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
       <div className="max-w-7xl mx-auto p-4">
         {activePage === 'statistics' ? (
           <div className="bg-white rounded-lg shadow-sm p-6">
-            <h2 className="text-lg font-bold text-gray-800 mb-6">Exhibition Statistics</h2>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold text-gray-800">Exhibition Statistics</h2>
+              <span className="text-xs bg-purple-100 text-purple-700 px-3 py-1 rounded font-semibold">
+                ADMIN VIEW - All Users
+              </span>
+            </div>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
               <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
@@ -945,7 +986,7 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
           <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold text-gray-800">
-                Saved Contacts ({filteredContacts.length})
+                {currentUser.role === 'admin' ? 'All Contacts' : 'My Contacts'} ({filteredContacts.length})
               </h3>
               {contacts.length > 0 && (
                 <button
@@ -984,7 +1025,7 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
                     />
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className={`grid grid-cols-1 ${currentUser.role === 'admin' ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-3`}>
                     <select
                       value={filterType}
                       onChange={(e) => setFilterType(e.target.value)}
@@ -1007,6 +1048,19 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
                       <option value="5-7">Medium Priority (5-7)</option>
                       <option value="1-4">Low Priority (1-4)</option>
                     </select>
+
+                    {currentUser.role === 'admin' && (
+                      <select
+                        value={filterSalesperson}
+                        onChange={(e) => setFilterSalesperson(e.target.value)}
+                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="all">All Salespeople</option>
+                        {[...new Set(contacts.map(c => c.salesPerson))].sort().map(person => (
+                          <option key={person} value={person}>{person}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 </div>
 
@@ -1044,9 +1098,12 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
                               {contact.phone && (
                                 <p className="text-sm text-gray-600">{contact.phone}</p>
                               )}
-                              <p className="text-xs text-gray-400 mt-2">
-                                By: {contact.salesPerson}
-                              </p>
+                              {currentUser.role === 'admin' && (
+                                <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
+                                  <User className="w-3 h-3" />
+                                  By: {contact.salesPerson}
+                                </p>
+                              )}
                             </div>
                             <div className="flex items-center gap-2 ml-4">
                               {expandedContact === contact.id ? (
@@ -1061,35 +1118,39 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
                         {expandedContact === contact.id && (
                           <div className="border-t p-4 bg-gray-50">
                             <div className="flex gap-2 mb-4">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleEditContact(contact);
-                                }}
-                                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                                Edit
-                              </button>
+                              {(currentUser.role === 'admin' || contact.salesPerson === currentUser.email) && (
+                                <>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleEditContact(contact);
+                                    }}
+                                    className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteContact(contact.id);
+                                    }}
+                                    className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition flex items-center justify-center gap-2"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                    Delete
+                                  </button>
+                                </>
+                              )}
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   shareWithBackoffice(contact);
                                 }}
-                                className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition flex items-center justify-center gap-2"
+                                className={`${currentUser.role === 'admin' || contact.salesPerson === currentUser.email ? 'flex-1' : 'w-full'} bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition flex items-center justify-center gap-2`}
                               >
                                 <Share2 className="w-4 h-4" />
                                 Share
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteContact(contact.id);
-                                }}
-                                className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition flex items-center justify-center gap-2"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                                Delete
                               </button>
                             </div>
 
