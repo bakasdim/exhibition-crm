@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Camera, User, LogOut, Save, X, Edit2, Trash2, Plus, ChevronDown, ChevronUp, Download, BarChart3, Search, Share2, CheckCircle, AlertCircle } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
 // ⚠️ REPLACE WITH YOUR SUPABASE CREDENTIALS
 const SUPABASE_URL = 'https://xgpzjkjcqohebsiyofol.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhncHpqa2pjcW9oZWJzaXlvZm9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MzQ1MDYsImV4cCI6MjA3NjExMDUwNn0.Dlm26WcwP8vu01XlrQ15owcpt3fkhfS0U5R43cUFsgA';
+
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -46,17 +47,16 @@ export default function ExhibitionCRM() {
   
   const [editingProduct, setEditingProduct] = useState(null);
   const [showCamera, setShowCamera] = useState(false);
-  const [activeContactId, setActiveContactId] = useState(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [stream, setStream] = useState(null);
   const [notification, setNotification] = useState(null);
   const [deleteConfirm, setDeleteConfirm] = useState(null);
 
-  const showNotification = (message, type = 'error') => {
+  const showNotification = useCallback((message, type = 'error') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
-  };
+  }, []);
 
   useEffect(() => {
     const style = document.createElement('style');
@@ -88,13 +88,7 @@ export default function ExhibitionCRM() {
   }, []);
 
   // Load contacts from Supabase when user logs in
-  useEffect(() => {
-    if (currentUser) {
-      loadContactsFromSupabase();
-    }
-  }, [currentUser]);
-
-  const loadContactsFromSupabase = async () => {
+  const loadContactsFromSupabase = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('contacts')
@@ -125,13 +119,15 @@ export default function ExhibitionCRM() {
       console.error('Error loading contacts:', error);
       showNotification('Failed to load contacts from database', 'error');
     }
-  };
+  }, [showNotification]);
 
   useEffect(() => {
-    applyFilters();
-  }, [searchTerm, filterType, filterPriority, contacts]);
+    if (currentUser) {
+      loadContactsFromSupabase();
+    }
+  }, [currentUser, loadContactsFromSupabase]);
 
-  const applyFilters = () => {
+  const applyFilters = useCallback(() => {
     let filtered = [...contacts];
 
     if (searchTerm) {
@@ -153,7 +149,11 @@ export default function ExhibitionCRM() {
     }
 
     setFilteredContacts(filtered);
-  };
+  }, [searchTerm, filterType, filterPriority, contacts]);
+
+  useEffect(() => {
+    applyFilters();
+  }, [applyFilters]);
 
   const handleLogin = () => {
     if (loginEmail) {
@@ -413,85 +413,6 @@ export default function ExhibitionCRM() {
         products: contactForm.products.filter((_, idx) => idx !== index)
       });
       showNotification('Product removed', 'success');
-    }
-  };
-
-  const handleAddProductToSavedContact = (contactId) => {
-    if (productForm.productType === 'other' && !productForm.customProductType.trim()) {
-      showNotification('Please enter a custom product type', 'error');
-      return;
-    }
-    
-    if (!productForm.productName.trim() && productForm.photos.length === 0) {
-      showNotification('Please enter a product name or take a photo', 'error');
-      return;
-    }
-    
-    const finalProductType = productForm.productType === 'other' 
-      ? productForm.customProductType 
-      : productForm.productType;
-    
-    const updatedContacts = contacts.map(contact => {
-      if (contact.id === contactId) {
-        const newProduct = { 
-          ...productForm, 
-          productType: finalProductType,
-          id: Date.now() 
-        };
-        return {
-          ...contact,
-          products: [...(contact.products || []), newProduct]
-        };
-      }
-      return contact;
-    });
-    
-    setContacts(updatedContacts);
-    setProductForm({ 
-      productType: 'chair',
-      customProductType: '',
-      productName: '', 
-      color: '',
-      pieces: '',
-      details: '',
-      photos: []
-    });
-    setActiveContactId(null);
-    showNotification('Product added successfully!', 'success');
-  };
-
-  const handleEditSavedContactProduct = (contactId, productIndex) => {
-    const contact = contacts.find(c => c.id === contactId);
-    const product = contact.products[productIndex];
-    
-    const updatedProduct = prompt('Edit product name:', product.productName);
-    if (updatedProduct) {
-      const updatedContacts = contacts.map(c => {
-        if (c.id === contactId) {
-          const updatedProducts = c.products.map((p, idx) => 
-            idx === productIndex ? { ...p, productName: updatedProduct } : p
-          );
-          return { ...c, products: updatedProducts };
-        }
-        return c;
-      });
-      setContacts(updatedContacts);
-    }
-  };
-
-  const handleDeleteSavedContactProduct = (contactId, productIndex) => {
-    if (window.confirm('Delete this product?')) {
-      const updatedContacts = contacts.map(c => {
-        if (c.id === contactId) {
-          return {
-            ...c,
-            products: c.products.filter((_, idx) => idx !== productIndex)
-          };
-        }
-        return c;
-      });
-      setContacts(updatedContacts);
-      showNotification('Product removed from contact', 'success');
     }
   };
 
