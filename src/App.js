@@ -1,18 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import React, { useState, useEffect, useRef } from 'react';
 import { Camera, User, LogOut, Save, X, Edit2, Trash2, Plus, ChevronDown, ChevronUp, Download, BarChart3, Search, Share2, CheckCircle, AlertCircle } from 'lucide-react';
-import './App.css';
+import { createClient } from '@supabase/supabase-js';
 
-// ⚠️ REPLACE THESE WITH YOUR SUPABASE CREDENTIALS
+// ⚠️ REPLACE WITH YOUR SUPABASE CREDENTIALS
 const SUPABASE_URL = 'https://xgpzjkjcqohebsiyofol.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhncHpqa2pjcW9oZWJzaXlvZm9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MzQ1MDYsImV4cCI6MjA3NjExMDUwNn0.Dlm26WcwP8vu01XlrQ15owcpt3fkhfS0U5R43cUFsgA';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-function App() {
+export default function ExhibitionCRM() {
   const [currentUser, setCurrentUser] = useState(null);
   const [loginEmail, setLoginEmail] = useState('');
-  const [activePage, setActivePage] = useState('contacts');
+  const [activePage, setActivePage] = useState('new-contact');
   const [contacts, setContacts] = useState([]);
   const [filteredContacts, setFilteredContacts] = useState([]);
   const [expandedContact, setExpandedContact] = useState(null);
@@ -21,8 +20,6 @@ function App() {
   const [filterPriority, setFilterPriority] = useState('all');
   const [lastSaved, setLastSaved] = useState(null);
   const [editingContact, setEditingContact] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [notification, setNotification] = useState(null);
   
   const [contactForm, setContactForm] = useState({
     name: '',
@@ -31,9 +28,9 @@ function App() {
     phone: '',
     company: '',
     businessType: 'apartments',
-    photos: [],
     products: [],
     notes: '',
+    timestamp: '',
     salesPerson: ''
   });
 
@@ -43,38 +40,61 @@ function App() {
     productName: '',
     color: '',
     pieces: '',
-    details: ''
+    details: '',
+    photos: []
   });
-
+  
+  const [editingProduct, setEditingProduct] = useState(null);
   const [showCamera, setShowCamera] = useState(false);
-  const [captureMode, setCaptureMode] = useState('product');
+  const [activeContactId, setActiveContactId] = useState(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
-  const streamRef = useRef(null);
+  const [stream, setStream] = useState(null);
+  const [notification, setNotification] = useState(null);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
 
-  const businessTypes = [
-    { value: 'apartments', label: 'Apartments' },
-    { value: 'airbnbs', label: 'Airbnbs' },
-    { value: 'hotels', label: 'Hotels' },
-    { value: 'cafe-restaurant', label: 'Cafe/Restaurant' }
-  ];
-
-  const productTypes = [
-    'chair', 'armchair', 'stool', 'table', 'coffee table', 
-    'side table', 'console', 'cabinet', 'shelving', 'other'
-  ];
-
-  // Show notification
   const showNotification = (message, type = 'error') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 5000);
   };
 
-  // Load contacts from Supabase
-  const loadContacts = useCallback(async () => {
-    if (!currentUser) return;
-    
-    setLoading(true);
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.innerHTML = `
+      @keyframes slideIn {
+        from {
+          transform: translateX(100%);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+      .animate-slide-in {
+        animation: slideIn 0.3s ease-out;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
+
+  // Load user from localStorage and contacts from Supabase
+  useEffect(() => {
+    const savedUser = localStorage.getItem('crmUser');
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+    }
+  }, []);
+
+  // Load contacts from Supabase when user logs in
+  useEffect(() => {
+    if (currentUser) {
+      loadContactsFromSupabase();
+    }
+  }, [currentUser]);
+
+  const loadContactsFromSupabase = async () => {
     try {
       const { data, error } = await supabase
         .from('contacts')
@@ -82,219 +102,127 @@ function App() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setContacts(data || []);
+
+      // Convert Supabase format to app format
+      const formattedContacts = (data || []).map(contact => ({
+        id: contact.id,
+        name: contact.name,
+        priority: contact.priority,
+        email: contact.email || '',
+        phone: contact.phone || '',
+        company: contact.company || '',
+        businessType: contact.business_type,
+        products: contact.products || [],
+        notes: contact.notes || '',
+        timestamp: contact.created_at,
+        salesPerson: contact.sales_person
+      }));
+
+      setContacts(formattedContacts);
+      setFilteredContacts(formattedContacts);
       setLastSaved(new Date());
     } catch (error) {
       console.error('Error loading contacts:', error);
-      showNotification('Failed to load contacts: ' + error.message);
-    } finally {
-      setLoading(false);
+      showNotification('Failed to load contacts from database', 'error');
     }
-  }, [currentUser]);
+  };
 
   useEffect(() => {
-    if (currentUser) {
-      loadContacts();
-    }
-  }, [currentUser, loadContacts]);
+    applyFilters();
+  }, [searchTerm, filterType, filterPriority, contacts]);
 
-  // Filter contacts
-  useEffect(() => {
-    let filtered = contacts;
+  const applyFilters = () => {
+    let filtered = [...contacts];
 
     if (searchTerm) {
-      filtered = filtered.filter(c =>
-        c.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.company?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.phone?.includes(searchTerm)
+      filtered = filtered.filter(contact =>
+        contact.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        contact.company.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        contact.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        contact.phone.includes(searchTerm)
       );
     }
 
     if (filterType !== 'all') {
-      filtered = filtered.filter(c => c.business_type === filterType);
+      filtered = filtered.filter(contact => contact.businessType === filterType);
     }
 
     if (filterPriority !== 'all') {
-      if (filterPriority === 'high') {
-        filtered = filtered.filter(c => c.priority >= 8);
-      } else if (filterPriority === 'medium') {
-        filtered = filtered.filter(c => c.priority >= 5 && c.priority < 8);
-      } else if (filterPriority === 'low') {
-        filtered = filtered.filter(c => c.priority < 5);
-      }
+      const [min, max] = filterPriority.split('-').map(Number);
+      filtered = filtered.filter(contact => contact.priority >= min && contact.priority <= max);
     }
 
     setFilteredContacts(filtered);
-  }, [contacts, searchTerm, filterType, filterPriority]);
+  };
 
-  // Check for duplicates
+  const handleLogin = () => {
+    if (loginEmail) {
+      const user = { email: loginEmail, loginTime: new Date().toISOString() };
+      setCurrentUser(user);
+      localStorage.setItem('crmUser', JSON.stringify(user));
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('crmUser');
+    setLoginEmail('');
+    setContacts([]);
+    setFilteredContacts([]);
+  };
+
   const checkDuplicate = (email, phone, excludeId = null) => {
-    if (!email && !phone) return null;
-    
-    return contacts.find(c => 
-      c.id !== excludeId && 
-      ((email && c.email === email) || (phone && c.phone === phone))
+    return contacts.find(contact => 
+      contact.id !== excludeId && 
+      (contact.email === email || contact.phone === phone)
     );
   };
 
-  // Handle login
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (loginEmail.trim()) {
-      setCurrentUser({ email: loginEmail.trim() });
-      setContactForm(prev => ({ ...prev, salesPerson: loginEmail.trim() }));
-    }
-  };
-
-  // Handle logout
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setLoginEmail('');
-    setContacts([]);
-    setActivePage('contacts');
-  };
-
-  // Handle form input
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setContactForm(prev => ({ ...prev, [name]: value }));
-  };
-
-  // Camera functions
-  const startCamera = async (mode = 'product') => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      streamRef.current = stream;
-      setShowCamera(true);
-      setCaptureMode(mode);
-    } catch (error) {
-      console.error('Camera error:', error);
-      showNotification('Could not access camera');
-    }
-  };
-
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    setShowCamera(false);
-  };
-
-  const capturePhoto = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0);
-      
-      canvas.toBlob((blob) => {
-        const url = URL.createObjectURL(blob);
-        setContactForm(prev => ({
-          ...prev,
-          photos: [...prev.photos, { url, blob, type: captureMode }]
-        }));
-        stopCamera();
-        showNotification('Photo captured!', 'success');
-      }, 'image/jpeg', 0.95);
-    }
-  };
-
-  const removePhoto = (index) => {
-    setContactForm(prev => ({
-      ...prev,
-      photos: prev.photos.filter((_, i) => i !== index)
-    }));
-  };
-
-  // Product functions
-  const addProduct = () => {
-    if (!productForm.productType && !productForm.customProductType) {
-      showNotification('Please select or enter a product type');
-      return;
-    }
-
-    const product = {
-      id: Date.now(),
-      type: productForm.productType === 'other' ? productForm.customProductType : productForm.productType,
-      name: productForm.productName,
-      color: productForm.color,
-      pieces: productForm.pieces,
-      details: productForm.details
-    };
-
-    setContactForm(prev => ({
-      ...prev,
-      products: [...prev.products, product]
-    }));
-
-    setProductForm({
-      productType: 'chair',
-      customProductType: '',
-      productName: '',
-      color: '',
-      pieces: '',
-      details: ''
-    });
-
-    showNotification('Product added!', 'success');
-  };
-
-  const removeProduct = (id) => {
-    setContactForm(prev => ({
-      ...prev,
-      products: prev.products.filter(p => p.id !== id)
-    }));
-  };
-
   // Upload photos to Supabase Storage
-  const uploadPhotos = async (contactId, photos) => {
-    const photoUrls = [];
-    
-    for (const photo of photos) {
+  const uploadPhotosToStorage = async (photos, contactId) => {
+    const uploadedUrls = [];
+
+    for (let i = 0; i < photos.length; i++) {
+      const photo = photos[i];
+      
+      // Convert base64 to blob
+      const response = await fetch(photo);
+      const blob = await response.blob();
+      
+      const fileName = `${contactId}_${Date.now()}_${i}.jpg`;
+      
       try {
-        const fileName = `${contactId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.jpg`;
-        const { error } = await supabase.storage
+        const { error: uploadError } = await supabase.storage
           .from('product-photos')
-          .upload(fileName, photo.blob, {
+          .upload(fileName, blob, {
             contentType: 'image/jpeg'
           });
 
-        if (error) throw error;
+        if (uploadError) throw uploadError;
 
         const { data: urlData } = supabase.storage
           .from('product-photos')
           .getPublicUrl(fileName);
 
-        photoUrls.push({ url: urlData.publicUrl, type: photo.type });
+        uploadedUrls.push(urlData.publicUrl);
       } catch (error) {
-        console.error('Photo upload error:', error);
+        console.error('Error uploading photo:', error);
       }
     }
 
-    return photoUrls;
+    return uploadedUrls;
   };
 
-  // Save/Update contact
   const handleContactSubmit = async () => {
-    // Validations
     if (!contactForm.name || !contactForm.name.trim()) {
-      showNotification('Contact name is required');
+      showNotification('Contact name is required', 'error');
       return;
     }
-
+    
     if (contactForm.phone) {
       const digitsOnly = contactForm.phone.replace(/\D/g, '');
       if (digitsOnly.length > 0 && digitsOnly.length !== 10) {
-        showNotification(`Telephone must be exactly 10 digits (currently ${digitsOnly.length} digits)`);
+        showNotification(`Telephone must be exactly 10 digits (currently ${digitsOnly.length} digits)`, 'error');
         return;
       }
     }
@@ -302,75 +230,74 @@ function App() {
     const duplicate = checkDuplicate(contactForm.email, contactForm.phone, editingContact?.id);
     if (duplicate && (contactForm.email || contactForm.phone)) {
       const duplicateField = contactForm.email === duplicate.email ? 'email' : 'phone number';
-      const confirmed = window.confirm(`Duplicate found: ${duplicate.name} has the same ${duplicateField}. Save anyway?`);
-      if (!confirmed) return;
+      showNotification(`A contact with this ${duplicateField} already exists: ${duplicate.name}. Please verify the information.`, 'warning');
+      if (!confirm(`Duplicate found: ${duplicate.name} has the same ${duplicateField}. Save anyway?`)) {
+        return;
+      }
     }
 
-    setLoading(true);
-
     try {
+      // Upload photos for all products
+      const productsWithUploadedPhotos = await Promise.all(
+        contactForm.products.map(async (product) => {
+          if (product.photos && product.photos.length > 0) {
+            const uploadedUrls = await uploadPhotosToStorage(product.photos, editingContact?.id || Date.now());
+            return {
+              ...product,
+              photos: uploadedUrls
+            };
+          }
+          return product;
+        })
+      );
+
       if (editingContact) {
         // Update existing contact
-        let photoUrls = editingContact.photo_urls || [];
-        
-        if (contactForm.photos.length > 0) {
-          const newPhotoUrls = await uploadPhotos(editingContact.id, contactForm.photos);
-          photoUrls = [...photoUrls, ...newPhotoUrls];
-        }
-
         const { error } = await supabase
           .from('contacts')
           .update({
             name: contactForm.name,
+            priority: contactForm.priority,
             email: contactForm.email,
             phone: contactForm.phone,
             company: contactForm.company,
             business_type: contactForm.businessType,
-            priority: parseInt(contactForm.priority),
+            products: productsWithUploadedPhotos,
             notes: contactForm.notes,
-            products: contactForm.products,
-            photo_urls: photoUrls
+            sales_person: contactForm.salesPerson
           })
           .eq('id', editingContact.id);
 
         if (error) throw error;
 
-        showNotification('Contact updated successfully!', 'success');
         setEditingContact(null);
+        showNotification('Contact updated successfully!', 'success');
       } else {
         // Create new contact
-        const contactData = {
-          name: contactForm.name,
-          email: contactForm.email,
-          phone: contactForm.phone,
-          company: contactForm.company,
-          business_type: contactForm.businessType,
-          priority: parseInt(contactForm.priority),
-          notes: contactForm.notes,
-          sales_person: currentUser.email,
-          products: contactForm.products
-        };
-
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from('contacts')
-          .insert([contactData])
-          .select()
-          .single();
+          .insert([{
+            name: contactForm.name,
+            priority: contactForm.priority,
+            email: contactForm.email,
+            phone: contactForm.phone,
+            company: contactForm.company,
+            business_type: contactForm.businessType,
+            products: productsWithUploadedPhotos,
+            notes: contactForm.notes,
+            sales_person: currentUser.email
+          }]);
 
         if (error) throw error;
-
-        if (contactForm.photos.length > 0) {
-          const photoUrls = await uploadPhotos(data.id, contactForm.photos);
-          await supabase
-            .from('contacts')
-            .update({ photo_urls: photoUrls })
-            .eq('id', data.id);
-        }
 
         showNotification('Contact saved successfully!', 'success');
       }
 
-      // Reset form
+      // Reload contacts from Supabase
+      await loadContactsFromSupabase();
+      
+      setTimeout(() => setActivePage('contacts'), 1000);
+
       setContactForm({
         name: '',
         priority: 5,
@@ -378,77 +305,220 @@ function App() {
         phone: '',
         company: '',
         businessType: 'apartments',
-        photos: [],
         products: [],
         notes: '',
-        salesPerson: currentUser.email
+        timestamp: '',
+        salesPerson: ''
       });
-
-      await loadContacts();
-      setActivePage('contacts');
     } catch (error) {
-      console.error('Save error:', error);
-      showNotification('Failed to save contact: ' + error.message);
-    } finally {
-      setLoading(false);
+      console.error('Error saving contact:', error);
+      showNotification('Failed to save contact to database', 'error');
     }
   };
 
-  // Edit contact
-  const handleEdit = (contact) => {
+  const handleEditContact = (contact) => {
+    setContactForm(contact);
     setEditingContact(contact);
-    setContactForm({
-      name: contact.name,
-      priority: contact.priority,
-      email: contact.email || '',
-      phone: contact.phone || '',
-      company: contact.company || '',
-      businessType: contact.business_type,
-      photos: [],
-      products: contact.products || [],
-      notes: contact.notes || '',
-      salesPerson: contact.sales_person
-    });
     setActivePage('new-contact');
+    window.scrollTo(0, 0);
   };
 
-  // Delete contact
-  const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete this contact?')) return;
+  const handleDeleteContact = (contactId) => {
+    const contactToDelete = contacts.find(c => c.id === contactId);
+    setDeleteConfirm({
+      id: contactId,
+      name: contactToDelete?.name || 'this contact'
+    });
+  };
 
-    setLoading(true);
-    try {
-      const { error } = await supabase
-        .from('contacts')
-        .delete()
-        .eq('id', id);
+  const confirmDelete = async () => {
+    if (deleteConfirm) {
+      try {
+        const { error } = await supabase
+          .from('contacts')
+          .delete()
+          .eq('id', deleteConfirm.id);
 
-      if (error) throw error;
+        if (error) throw error;
 
-      showNotification('Contact deleted successfully!', 'success');
-      await loadContacts();
-    } catch (error) {
-      console.error('Delete error:', error);
-      showNotification('Failed to delete contact: ' + error.message);
-    } finally {
-      setLoading(false);
+        await loadContactsFromSupabase();
+        setExpandedContact(null);
+        setDeleteConfirm(null);
+        showNotification('Contact deleted successfully', 'success');
+      } catch (error) {
+        console.error('Error deleting contact:', error);
+        showNotification('Failed to delete contact', 'error');
+      }
     }
   };
 
-  // Export to CSV
-  const exportToCSV = (dataToExport) => {
-    const headers = ['Name', 'Company', 'Email', 'Phone', 'Business Type', 'Priority', 'Products', 'Notes', 'Salesperson', 'Date'];
-    const rows = dataToExport.map(c => [
-      c.name,
-      c.company || '',
-      c.email || '',
-      c.phone || '',
-      c.business_type,
-      c.priority,
-      (c.products || []).map(p => `${p.type} (${p.pieces || 'N/A'})`).join('; '),
-      c.notes || '',
-      c.sales_person,
-      new Date(c.created_at).toLocaleDateString()
+  const cancelDelete = () => {
+    setDeleteConfirm(null);
+  };
+
+  const handleAddProductToContact = () => {
+    if (productForm.productType === 'other' && !productForm.customProductType.trim()) {
+      showNotification('Please enter a custom product type', 'error');
+      return;
+    }
+    
+    if (!productForm.productName.trim() && productForm.photos.length === 0) {
+      showNotification('Please enter a product name or take a photo', 'error');
+      return;
+    }
+    
+    const finalProductType = productForm.productType === 'other' 
+      ? productForm.customProductType 
+      : productForm.productType;
+    
+    if (editingProduct !== null) {
+      const updatedProducts = contactForm.products.map((p, idx) => 
+        idx === editingProduct ? { ...productForm, productType: finalProductType, id: p.id } : p
+      );
+      setContactForm({ ...contactForm, products: updatedProducts });
+      setEditingProduct(null);
+      showNotification('Product updated successfully!', 'success');
+    } else {
+      const newProduct = {
+        ...productForm,
+        productType: finalProductType,
+        id: Date.now()
+      };
+      setContactForm({
+        ...contactForm,
+        products: [...contactForm.products, newProduct]
+      });
+      showNotification('Product added successfully!', 'success');
+    }
+    setProductForm({ 
+      productType: 'chair',
+      customProductType: '',
+      productName: '', 
+      color: '',
+      pieces: '',
+      details: '',
+      photos: []
+    });
+  };
+
+  const handleEditProduct = (index) => {
+    setEditingProduct(index);
+    setProductForm(contactForm.products[index]);
+  };
+
+  const handleDeleteProduct = (index) => {
+    if (confirm('Delete this product?')) {
+      setContactForm({
+        ...contactForm,
+        products: contactForm.products.filter((_, idx) => idx !== index)
+      });
+      showNotification('Product removed', 'success');
+    }
+  };
+
+  const handleAddProductToSavedContact = (contactId) => {
+    if (productForm.productType === 'other' && !productForm.customProductType.trim()) {
+      showNotification('Please enter a custom product type', 'error');
+      return;
+    }
+    
+    if (!productForm.productName.trim() && productForm.photos.length === 0) {
+      showNotification('Please enter a product name or take a photo', 'error');
+      return;
+    }
+    
+    const finalProductType = productForm.productType === 'other' 
+      ? productForm.customProductType 
+      : productForm.productType;
+    
+    const updatedContacts = contacts.map(contact => {
+      if (contact.id === contactId) {
+        const newProduct = { 
+          ...productForm, 
+          productType: finalProductType,
+          id: Date.now() 
+        };
+        return {
+          ...contact,
+          products: [...(contact.products || []), newProduct]
+        };
+      }
+      return contact;
+    });
+    
+    setContacts(updatedContacts);
+    setProductForm({ 
+      productType: 'chair',
+      customProductType: '',
+      productName: '', 
+      color: '',
+      pieces: '',
+      details: '',
+      photos: []
+    });
+    setActiveContactId(null);
+    showNotification('Product added successfully!', 'success');
+  };
+
+  const handleEditSavedContactProduct = (contactId, productIndex) => {
+    const contact = contacts.find(c => c.id === contactId);
+    const product = contact.products[productIndex];
+    
+    const updatedProduct = prompt('Edit product name:', product.productName);
+    if (updatedProduct) {
+      const updatedContacts = contacts.map(c => {
+        if (c.id === contactId) {
+          const updatedProducts = c.products.map((p, idx) => 
+            idx === productIndex ? { ...p, productName: updatedProduct } : p
+          );
+          return { ...c, products: updatedProducts };
+        }
+        return c;
+      });
+      setContacts(updatedContacts);
+    }
+  };
+
+  const handleDeleteSavedContactProduct = (contactId, productIndex) => {
+    if (confirm('Delete this product?')) {
+      const updatedContacts = contacts.map(c => {
+        if (c.id === contactId) {
+          return {
+            ...c,
+            products: c.products.filter((_, idx) => idx !== productIndex)
+          };
+        }
+        return c;
+      });
+      setContacts(updatedContacts);
+      showNotification('Product removed from contact', 'success');
+    }
+  };
+
+  const exportToCSV = (contactsToExport) => {
+    if (contactsToExport.length === 0) {
+      showNotification('No contacts to export', 'warning');
+      return;
+    }
+
+    const headers = ['Name', 'Company', 'Email', 'Phone', 'Business Type', 'Priority', 'Products', 'Notes', 'Sales Person', 'Date'];
+    const rows = contactsToExport.map(contact => [
+      contact.name,
+      contact.company,
+      contact.email,
+      contact.phone,
+      contact.businessType,
+      contact.priority,
+      contact.products.map(p => {
+        const name = p.productName || '[Photo only - identify from image]';
+        const qty = p.pieces ? ` (Qty: ${p.pieces})` : '';
+        const color = p.color ? ` - ${p.color}` : '';
+        const photoNote = p.photos && p.photos.length > 0 ? ` [${p.photos.length} photo(s)]` : '';
+        return `${p.productType}: ${name}${qty}${color}${photoNote}`;
+      }).join('; '),
+      contact.notes,
+      contact.salesPerson,
+      new Date(contact.timestamp).toLocaleDateString()
     ]);
 
     const csvContent = [headers, ...rows]
@@ -459,626 +529,184 @@ function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `contacts-${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `exhibition-contacts-${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
-
-    showNotification('Export completed!', 'success');
+    
+    showNotification(`Exported ${contactsToExport.length} contacts to CSV`, 'success');
   };
 
-  // Share via email
-  const shareContact = (contact) => {
-    const products = (contact.products || []).map(p => 
-      `- ${p.type}${p.name ? ` (${p.name})` : ''}${p.pieces ? ` - ${p.pieces} pieces` : ''}${p.color ? ` - ${p.color}` : ''}${p.details ? ` - ${p.details}` : ''}`
-    ).join('\n');
+  const shareWithBackoffice = (contact) => {
+    const subject = encodeURIComponent(`Exhibition Lead: ${contact.name}`);
+    const body = encodeURIComponent(`
+New Exhibition Lead
 
-    const body = `New Contact Inquiry from Exhibition
-
-Name: ${contact.name}
-Company: ${contact.company || 'N/A'}
-Email: ${contact.email || 'N/A'}
-Phone: ${contact.phone || 'N/A'}
-Business Type: ${contact.business_type}
-Priority: ${contact.priority}/10
+Contact Information:
+- Name: ${contact.name}
+- Company: ${contact.company}
+- Email: ${contact.email}
+- Phone: ${contact.phone}
+- Business Type: ${contact.businessType}
+- Priority: ${contact.priority}/10
 
 Products of Interest:
-${products || 'None specified'}
+${contact.products.map(p => {
+  const name = p.productName || '[Photo only - identify from image]';
+  const qty = p.pieces ? ` (Qty: ${p.pieces})` : '';
+  const color = p.color ? ` (${p.color})` : '';
+  const details = p.details ? ` - ${p.details}` : '';
+  const photoNote = p.photos && p.photos.length > 0 ? ` [${p.photos.length} photo(s) attached]` : '';
+  return `- ${p.productType}: ${name}${qty}${color}${details}${photoNote}`;
+}).join('\n')}
 
 Notes:
-${contact.notes || 'None'}
+${contact.notes || 'No additional notes'}
 
----
-Collected by: ${contact.sales_person}
-Date: ${new Date(contact.created_at).toLocaleString()}`;
+Collected by: ${contact.salesPerson}
+Date: ${new Date(contact.timestamp).toLocaleString()}
+    `);
 
-    const mailtoLink = `mailto:backoffice@yourcompany.com?subject=Exhibition Inquiry - ${contact.name}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailtoLink;
+    window.location.href = `mailto:backoffice@yourcompany.com?subject=${subject}&body=${body}`;
+    showNotification('Opening email client...', 'success');
   };
 
-  // Statistics
-  const getStats = () => {
-    const bySalesperson = contacts.reduce((acc, c) => {
-      acc[c.sales_person] = (acc[c.sales_person] || 0) + 1;
-      return acc;
-    }, {});
+  const startCamera = async () => {
+    try {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } 
+      });
+      setStream(mediaStream);
+      setShowCamera(true);
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = mediaStream;
+        }
+      }, 100);
+    } catch (err) {
+      showNotification('Camera access denied or not available. Please check your browser permissions.', 'error');
+    }
+  };
 
-    const byType = contacts.reduce((acc, c) => {
-      acc[c.business_type] = (acc[c.business_type] || 0) + 1;
-      return acc;
-    }, {});
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      const photoData = canvas.toDataURL('image/jpeg');
+      
+      setProductForm({
+        ...productForm,
+        photos: [...productForm.photos, photoData]
+      });
+      stopCamera();
+      showNotification('Product photo captured successfully!', 'success');
+    }
+  };
 
-    return {
+  const stopCamera = () => {
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      setStream(null);
+    }
+    setShowCamera(false);
+  };
+
+  const removePhoto = (index) => {
+    setProductForm({
+      ...productForm,
+      photos: productForm.photos.filter((_, i) => i !== index)
+    });
+  };
+
+  const getStatistics = () => {
+    const stats = {
       total: contacts.length,
-      highPriority: contacts.filter(c => c.priority >= 8).length,
-      salespeople: Object.keys(bySalesperson).length,
-      bySalesperson,
-      byType
+      bySalesperson: {},
+      byBusinessType: {},
+      highPriority: contacts.filter(c => c.priority >= 8).length
     };
+
+    contacts.forEach(contact => {
+      stats.bySalesperson[contact.salesPerson] = (stats.bySalesperson[contact.salesPerson] || 0) + 1;
+      stats.byBusinessType[contact.businessType] = (stats.byBusinessType[contact.businessType] || 0) + 1;
+    });
+
+    return stats;
   };
 
-  const stats = getStats();
-
-  // Login Screen
   if (!currentUser) {
     return (
-      <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-        <div style={{ background: 'white', padding: '40px', borderRadius: '16px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)', maxWidth: '400px', width: '100%', textAlign: 'center' }}>
-          <h1 style={{ fontSize: '32px', marginBottom: '10px' }}>🎪 Exhibition CRM</h1>
-          <p style={{ color: '#666', marginBottom: '30px' }}>Sales Contact Tracker</p>
-          <form onSubmit={handleLogin}>
-            <input
-              type="email"
-              value={loginEmail}
-              onChange={(e) => setLoginEmail(e.target.value)}
-              placeholder="Enter your email"
-              style={{ width: '100%', padding: '15px', border: '2px solid #e5e7eb', borderRadius: '8px', fontSize: '16px', marginBottom: '15px' }}
-              required
-            />
-            <button type="submit" style={{ width: '100%', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', border: 'none', padding: '15px', borderRadius: '8px', fontSize: '16px', fontWeight: '600', cursor: 'pointer' }}>
-              Start Tracking
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
+          <div className="text-center mb-8">
+            <div className="w-16 h-16 bg-blue-600 rounded-lg mx-auto mb-4 flex items-center justify-center">
+              <User className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-800 mb-2">Exhibition CRM</h1>
+            <p className="text-gray-600">Sign in with your Microsoft 365 account</p>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Email Address
+              </label>
+              <input
+                type="email"
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="name@company.com"
+              />
+            </div>
+            <button
+              onClick={handleLogin}
+              className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition"
+            >
+              Sign In
             </button>
-          </form>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Main App
+  const stats = getStatistics();
+
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', padding: '20px' }}>
-      {/* Header */}
-      <div style={{ background: 'white', padding: '20px', borderRadius: '12px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-        <h1 style={{ fontSize: '24px', color: '#333', margin: 0 }}>📋 Exhibition CRM</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' }}>
-          {lastSaved && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '14px', color: '#10b981' }}>
-              <CheckCircle size={16} />
-              Saved {lastSaved.toLocaleTimeString()}
+    <div className="min-h-screen bg-gray-50">
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex justify-between items-center">
+            <h1 className="text-xl font-bold text-gray-800">Exhibition CRM</h1>
+            <div className="flex items-center gap-4">
+              {lastSaved && (
+                <div className="flex items-center gap-2 text-sm text-green-600">
+                  <CheckCircle className="w-4 h-4" />
+                  <span>Synced {lastSaved.toLocaleTimeString()}</span>
+                </div>
+              )}
+              <span className="text-sm text-gray-600">{currentUser.email}</span>
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout
+              </button>
             </div>
-          )}
-          <span style={{ background: '#667eea', color: 'white', padding: '8px 16px', borderRadius: '20px', fontSize: '14px' }}>
-            {currentUser.email}
-          </span>
-          <button onClick={handleLogout} style={{ background: '#ef4444', color: 'white', border: 'none', padding: '10px 20px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <LogOut size={16} />
-            Logout
-          </button>
+          </div>
         </div>
       </div>
 
-      {/* Notification */}
-      {notification && (
-        <div style={{ 
-          background: notification.type === 'error' ? '#fee2e2' : notification.type === 'warning' ? '#fef3c7' : '#d1fae5', 
-          border: `2px solid ${notification.type === 'error' ? '#ef4444' : notification.type === 'warning' ? '#f59e0b' : '#10b981'}`,
-          padding: '15px',
-          borderRadius: '8px',
-          marginBottom: '20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px'
-        }}>
-          {notification.type === 'error' ? <AlertCircle color="#ef4444" /> : <CheckCircle color="#10b981" />}
-          <span>{notification.message}</span>
-        </div>
-      )}
-
-      {/* Navigation */}
-      <div style={{ background: 'white', padding: '10px', borderRadius: '12px', marginBottom: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-        <button 
-          onClick={() => setActivePage('new-contact')} 
-          style={{ 
-            flex: '1', 
-            minWidth: '150px',
-            background: activePage === 'new-contact' ? '#667eea' : '#f3f4f6', 
-            color: activePage === 'new-contact' ? 'white' : '#333', 
-            border: 'none', 
-            padding: '12px 20px', 
-            borderRadius: '8px', 
-            cursor: 'pointer',
-            fontWeight: '500',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px'
-          }}
-        >
-          <Plus size={18} />
-          New Contact
-        </button>
-        <button 
-          onClick={() => setActivePage('contacts')} 
-          style={{ 
-            flex: '1',
-            minWidth: '150px',
-            background: activePage === 'contacts' ? '#667eea' : '#f3f4f6', 
-            color: activePage === 'contacts' ? 'white' : '#333', 
-            border: 'none', 
-            padding: '12px 20px', 
-            borderRadius: '8px', 
-            cursor: 'pointer',
-            fontWeight: '500',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px'
-          }}
-        >
-          <User size={18} />
-          Contacts ({contacts.length})
-        </button>
-        <button 
-          onClick={() => setActivePage('statistics')} 
-          style={{ 
-            flex: '1',
-            minWidth: '150px',
-            background: activePage === 'statistics' ? '#667eea' : '#f3f4f6', 
-            color: activePage === 'statistics' ? 'white' : '#333', 
-            border: 'none', 
-            padding: '12px 20px', 
-            borderRadius: '8px', 
-            cursor: 'pointer',
-            fontWeight: '500',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px'
-          }}
-        >
-          <BarChart3 size={18} />
-          Statistics
-        </button>
-      </div>
-
-      {/* Statistics Page */}
-      {activePage === 'statistics' && (
-        <div style={{ background: 'white', padding: '30px', borderRadius: '12px' }}>
-          <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '20px' }}>Exhibition Statistics</h2>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px', marginBottom: '30px' }}>
-            <div style={{ background: '#dbeafe', padding: '20px', borderRadius: '12px' }}>
-              <div style={{ fontSize: '14px', color: '#1e40af', marginBottom: '5px' }}>Total Contacts</div>
-              <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#1e3a8a' }}>{stats.total}</div>
-            </div>
-            <div style={{ background: '#fecaca', padding: '20px', borderRadius: '12px' }}>
-              <div style={{ fontSize: '14px', color: '#991b1b', marginBottom: '5px' }}>High Priority</div>
-              <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#7f1d1d' }}>{stats.highPriority}</div>
-            </div>
-            <div style={{ background: '#d1fae5', padding: '20px', borderRadius: '12px' }}>
-              <div style={{ fontSize: '14px', color: '#065f46', marginBottom: '5px' }}>Salespeople</div>
-              <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#064e3b' }}>{stats.salespeople}</div>
-            </div>
-          </div>
-
-          <div style={{ marginBottom: '30px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '15px' }}>Contacts by Salesperson</h3>
-            {Object.entries(stats.bySalesperson).map(([person, count]) => (
-              <div key={person} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', background: '#f9fafb', borderRadius: '8px', marginBottom: '8px' }}>
-                <span>{person}</span>
-                <span style={{ fontWeight: 'bold' }}>{count}</span>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ marginBottom: '30px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 'bold', marginBottom: '15px' }}>Contacts by Business Type</h3>
-            {Object.entries(stats.byType).map(([type, count]) => (
-              <div key={type} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px', background: '#f9fafb', borderRadius: '8px', marginBottom: '8px' }}>
-                <span style={{ textTransform: 'capitalize' }}>{type.replace('-', ' ')}</span>
-                <span style={{ fontWeight: 'bold' }}>{count}</span>
-              </div>
-            ))}
-          </div>
-
-          <button
-            onClick={() => exportToCSV(contacts)}
-            style={{ width: '100%', background: '#10b981', color: 'white', border: 'none', padding: '15px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}
-          >
-            <Download size={20} />
-            Export All Contacts to CSV
-          </button>
-        </div>
-      )}
-
-      {/* Contacts Page */}
-      {activePage === 'contacts' && (
-        <div style={{ background: 'white', padding: '20px', borderRadius: '12px' }}>
-          <div style={{ marginBottom: '20px' }}>
-            <div style={{ display: 'flex', gap: '10px', marginBottom: '15px', flexWrap: 'wrap' }}>
-              <div style={{ flex: '1', minWidth: '200px', position: 'relative' }}>
-                <Search size={20} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#9ca3af' }} />
-                <input
-                  type="text"
-                  placeholder="Search contacts..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  style={{ width: '100%', padding: '12px 12px 12px 40px', border: '2px solid #e5e7eb', borderRadius: '8px', fontSize: '14px' }}
-                />
-              </div>
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                style={{ padding: '12px', border: '2px solid #e5e7eb', borderRadius: '8px', fontSize: '14px' }}
-              >
-                <option value="all">All Types</option>
-                {businessTypes.map(t => (
-                  <option key={t.value} value={t.value}>{t.label}</option>
-                ))}
-              </select>
-              <select
-                value={filterPriority}
-                onChange={(e) => setFilterPriority(e.target.value)}
-                style={{ padding: '12px', border: '2px solid #e5e7eb', borderRadius: '8px', fontSize: '14px' }}
-              >
-                <option value="all">All Priorities</option>
-                <option value="high">High (8-10)</option>
-                <option value="medium">Medium (5-7)</option>
-                <option value="low">Low (1-4)</option>
-              </select>
-              <button
-                onClick={() => exportToCSV(filteredContacts)}
-                style={{ padding: '12px 20px', background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '500' }}
-              >
-                <Download size={18} />
-                Export ({filteredContacts.length})
-              </button>
-            </div>
-          </div>
-
-          {loading && <div style={{ textAlign: 'center', padding: '40px' }}>Loading...</div>}
-
-          {!loading && filteredContacts.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '60px 20px', color: '#666' }}>
-              <p style={{ fontSize: '18px' }}>No contacts found</p>
-            </div>
-          )}
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-            {filteredContacts.map(contact => (
-              <div key={contact.id} style={{ background: '#f9fafb', border: '2px solid #e5e7eb', borderRadius: '12px', padding: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '15px' }}>
-                  <h3 style={{ fontSize: '18px', fontWeight: 'bold', margin: 0 }}>{contact.name}</h3>
-                  <span style={{ 
-                    padding: '4px 12px', 
-                    borderRadius: '12px', 
-                    fontSize: '12px', 
-                    fontWeight: '600',
-                    background: contact.priority >= 8 ? '#fecaca' : contact.priority >= 5 ? '#fef3c7' : '#dbeafe',
-                    color: contact.priority >= 8 ? '#991b1b' : contact.priority >= 5 ? '#92400e' : '#1e40af'
-                  }}>
-                    Priority: {contact.priority}
-                  </span>
-                </div>
-
-                {contact.photo_urls && contact.photo_urls.length > 0 && (
-                  <div style={{ marginBottom: '15px' }}>
-                    <img src={contact.photo_urls[0].url} alt="Contact" style={{ width: '100%', height: '200px', objectFit: 'cover', borderRadius: '8px' }} />
-                  </div>
-                )}
-
-                <div style={{ marginBottom: '15px', fontSize: '14px', color: '#4b5563' }}>
-                  {contact.company && <div style={{ marginBottom: '6px' }}><strong>Company:</strong> {contact.company}</div>}
-                  {contact.email && <div style={{ marginBottom: '6px' }}><strong>Email:</strong> {contact.email}</div>}
-                  {contact.phone && <div style={{ marginBottom: '6px' }}><strong>Phone:</strong> {contact.phone}</div>}
-                  <div style={{ marginBottom: '6px' }}><strong>Type:</strong> {contact.business_type}</div>
-                  {contact.products && contact.products.length > 0 && (
-                    <div style={{ marginBottom: '6px' }}>
-                      <strong>Products:</strong> {contact.products.map(p => p.type).join(', ')}
-                    </div>
-                  )}
-                  {contact.notes && <div style={{ marginBottom: '6px' }}><strong>Notes:</strong> {contact.notes}</div>}
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '15px', borderTop: '1px solid #e5e7eb' }}>
-                  <small style={{ color: '#9ca3af', fontSize: '12px' }}>
-                    {new Date(contact.created_at).toLocaleDateString()}
-                  </small>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      onClick={() => shareContact(contact)}
-                      style={{ padding: '6px 12px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                    >
-                      <Share2 size={14} />
-                      Share
-                    </button>
-                    <button
-                      onClick={() => handleEdit(contact)}
-                      style={{ padding: '6px 12px', background: '#f59e0b', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                    >
-                      <Edit2 size={14} />
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(contact.id)}
-                      style={{ padding: '6px 12px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* New/Edit Contact Page */}
-      {activePage === 'new-contact' && (
-        <div style={{ background: 'white', padding: '30px', borderRadius: '12px', maxWidth: '800px', margin: '0 auto' }}>
-          <h2 style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '20px' }}>
-            {editingContact ? '✏️ Edit Contact' : '➕ New Contact'}
-          </h2>
-
-          {/* Contact Details */}
-          <div style={{ marginBottom: '30px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '15px' }}>Contact Details</h3>
-            
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', fontSize: '14px' }}>Name *</label>
-                <input
-                  type="text"
-                  name="name"
-                  value={contactForm.name}
-                  onChange={handleInputChange}
-                  style={{ width: '100%', padding: '10px', border: '2px solid #e5e7eb', borderRadius: '8px' }}
-                  required
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', fontSize: '14px' }}>Company</label>
-                <input
-                  type="text"
-                  name="company"
-                  value={contactForm.company}
-                  onChange={handleInputChange}
-                  style={{ width: '100%', padding: '10px', border: '2px solid #e5e7eb', borderRadius: '8px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', fontSize: '14px' }}>Email</label>
-                <input
-                  type="email"
-                  name="email"
-                  value={contactForm.email}
-                  onChange={handleInputChange}
-                  style={{ width: '100%', padding: '10px', border: '2px solid #e5e7eb', borderRadius: '8px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', fontSize: '14px' }}>Phone (10 digits)</label>
-                <input
-                  type="tel"
-                  name="phone"
-                  value={contactForm.phone}
-                  onChange={handleInputChange}
-                  style={{ width: '100%', padding: '10px', border: '2px solid #e5e7eb', borderRadius: '8px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', fontSize: '14px' }}>Business Type</label>
-                <select
-                  name="businessType"
-                  value={contactForm.businessType}
-                  onChange={handleInputChange}
-                  style={{ width: '100%', padding: '10px', border: '2px solid #e5e7eb', borderRadius: '8px' }}
-                >
-                  {businessTypes.map(t => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', fontSize: '14px' }}>
-                  Priority: {contactForm.priority}
-                </label>
-                <input
-                  type="range"
-                  name="priority"
-                  min="1"
-                  max="10"
-                  value={contactForm.priority}
-                  onChange={handleInputChange}
-                  style={{ width: '100%' }}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#666', marginTop: '4px' }}>
-                  <span>Low</span>
-                  <span>High</span>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '6px', fontWeight: '500', fontSize: '14px' }}>Notes</label>
-              <textarea
-                name="notes"
-                value={contactForm.notes}
-                onChange={handleInputChange}
-                rows="4"
-                style={{ width: '100%', padding: '10px', border: '2px solid #e5e7eb', borderRadius: '8px' }}
-                placeholder="General notes about the contact..."
-              />
-            </div>
-          </div>
-
-          {/* Products */}
-          <div style={{ marginBottom: '30px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '15px' }}>Products of Interest</h3>
-            
-            <div style={{ background: '#f9fafb', padding: '15px', borderRadius: '8px', marginBottom: '15px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginBottom: '10px' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', fontWeight: '500' }}>Product Type</label>
-                  <select
-                    value={productForm.productType}
-                    onChange={(e) => setProductForm({ ...productForm, productType: e.target.value })}
-                    style={{ width: '100%', padding: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '14px' }}
-                  >
-                    {productTypes.map(type => (
-                      <option key={type} value={type}>{type}</option>
-                    ))}
-                  </select>
-                </div>
-
-                {productForm.productType === 'other' && (
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', fontWeight: '500' }}>Custom Type</label>
-                    <input
-                      type="text"
-                      value={productForm.customProductType}
-                      onChange={(e) => setProductForm({ ...productForm, customProductType: e.target.value })}
-                      style={{ width: '100%', padding: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '14px' }}
-                      placeholder="Enter type"
-                    />
-                  </div>
-                )}
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', fontWeight: '500' }}>Product Name</label>
-                  <input
-                    type="text"
-                    value={productForm.productName}
-                    onChange={(e) => setProductForm({ ...productForm, productName: e.target.value })}
-                    style={{ width: '100%', padding: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '14px' }}
-                    placeholder="Optional"
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', fontWeight: '500' }}>Color</label>
-                  <input
-                    type="text"
-                    value={productForm.color}
-                    onChange={(e) => setProductForm({ ...productForm, color: e.target.value })}
-                    style={{ width: '100%', padding: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '14px' }}
-                    placeholder="Optional"
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', fontWeight: '500' }}>Pieces</label>
-                  <input
-                    type="text"
-                    value={productForm.pieces}
-                    onChange={(e) => setProductForm({ ...productForm, pieces: e.target.value })}
-                    style={{ width: '100%', padding: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '14px' }}
-                    placeholder="Optional"
-                  />
-                </div>
-
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', fontWeight: '500' }}>Details</label>
-                  <input
-                    type="text"
-                    value={productForm.details}
-                    onChange={(e) => setProductForm({ ...productForm, details: e.target.value })}
-                    style={{ width: '100%', padding: '8px', border: '1px solid #e5e7eb', borderRadius: '6px', fontSize: '14px' }}
-                    placeholder="Additional details"
-                  />
-                </div>
-              </div>
-
-              <button
-                onClick={addProduct}
-                style={{ width: '100%', padding: '10px', background: '#10b981', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: '500', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-              >
-                <Plus size={18} />
-                Add Product
-              </button>
-            </div>
-
-            {contactForm.products.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {contactForm.products.map(product => (
-                  <div key={product.id} style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: '12px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: '14px' }}>
-                      <strong>{product.type}</strong>
-                      {product.name && ` - ${product.name}`}
-                      {product.color && ` (${product.color})`}
-                      {product.pieces && ` - ${product.pieces} pieces`}
-                      {product.details && <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>{product.details}</div>}
-                    </div>
-                    <button
-                      onClick={() => removeProduct(product.id)}
-                      style={{ background: '#ef4444', color: 'white', border: 'none', padding: '6px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px' }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Photos */}
-          <div style={{ marginBottom: '30px' }}>
-            <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '15px' }}>Photos</h3>
-            
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '10px', marginBottom: '15px' }}>
-              {contactForm.photos.map((photo, index) => (
-                <div key={index} style={{ position: 'relative', paddingBottom: '100%', background: '#f3f4f6', borderRadius: '8px', overflow: 'hidden' }}>
-                  <img src={photo.url} alt={`Photo ${index + 1}`} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-                  <button
-                    onClick={() => removePhoto(index)}
-                    style={{ position: 'absolute', top: '5px', right: '5px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '50%', width: '24px', height: '24px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                  >
-                    <X size={14} />
-                  </button>
-                  <div style={{ position: 'absolute', bottom: '5px', left: '5px', background: 'rgba(0,0,0,0.6)', color: 'white', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>
-                    {photo.type}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <button
-                onClick={() => startCamera('product')}
-                style={{ flex: 1, padding: '12px', background: '#667eea', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '500', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-              >
-                <Camera size={18} />
-                Capture Product Photo
-              </button>
-              <button
-                onClick={() => startCamera('business-card')}
-                style={{ flex: 1, padding: '12px', background: '#764ba2', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '500', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
-              >
-                <Camera size={18} />
-                Capture Business Card
-              </button>
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', gap: '10px' }}>
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="flex gap-2">
             <button
               onClick={() => {
-                setActivePage('contacts');
+                setActivePage('new-contact');
                 setEditingContact(null);
                 setContactForm({
                   name: '',
@@ -1087,57 +715,890 @@ Date: ${new Date(contact.created_at).toLocaleString()}`;
                   phone: '',
                   company: '',
                   businessType: 'apartments',
-                  photos: [],
                   products: [],
                   notes: '',
-                  salesPerson: currentUser.email
+                  timestamp: '',
+                  salesPerson: ''
                 });
               }}
-              style={{ flex: 1, padding: '15px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}
+              className={`flex items-center gap-2 px-6 py-3 font-medium border-b-2 transition ${
+                activePage === 'new-contact'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-800'
+              }`}
             >
-              Cancel
+              <Plus className="w-4 h-4" />
+              New Contact
             </button>
             <button
-              onClick={handleContactSubmit}
-              disabled={loading}
-              style={{ flex: 2, padding: '15px', background: loading ? '#9ca3af' : '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+              onClick={() => setActivePage('contacts')}
+              className={`flex items-center gap-2 px-6 py-3 font-medium border-b-2 transition ${
+                activePage === 'contacts'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-800'
+              }`}
             >
-              <Save size={20} />
-              {loading ? 'Saving...' : (editingContact ? 'Update Contact' : 'Save Contact')}
+              <User className="w-4 h-4" />
+              Saved Contacts ({contacts.length})
+            </button>
+            <button
+              onClick={() => setActivePage('statistics')}
+              className={`flex items-center gap-2 px-6 py-3 font-medium border-b-2 transition ${
+                activePage === 'statistics'
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-600 hover:text-gray-800'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              Statistics
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {notification && (
+        <div className="fixed top-4 right-4 z-50 animate-slide-in">
+          <div className={`rounded-lg shadow-lg p-4 max-w-md flex items-start gap-3 ${
+            notification.type === 'success' 
+              ? 'bg-green-50 border-2 border-green-500' 
+              : notification.type === 'warning'
+              ? 'bg-yellow-50 border-2 border-yellow-500'
+              : 'bg-red-50 border-2 border-red-500'
+          }`}>
+            {notification.type === 'success' ? (
+              <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <AlertCircle className={`w-6 h-6 flex-shrink-0 mt-0.5 ${
+                notification.type === 'warning' ? 'text-yellow-600' : 'text-red-600'
+              }`} />
+            )}
+            <div className="flex-1">
+              <p className={`font-medium ${
+                notification.type === 'success' 
+                  ? 'text-green-800' 
+                  : notification.type === 'warning'
+                  ? 'text-yellow-800'
+                  : 'text-red-800'
+              }`}>
+                {notification.type === 'success' ? 'Success' : notification.type === 'warning' ? 'Warning' : 'Error'}
+              </p>
+              <p className={`text-sm mt-1 ${
+                notification.type === 'success' 
+                  ? 'text-green-700' 
+                  : notification.type === 'warning'
+                  ? 'text-yellow-700'
+                  : 'text-red-700'
+              }`}>
+                {notification.message}
+              </p>
+            </div>
+            <button
+              onClick={() => setNotification(null)}
+              className={`flex-shrink-0 ${
+                notification.type === 'success' 
+                  ? 'text-green-600 hover:text-green-800' 
+                  : notification.type === 'warning'
+                  ? 'text-yellow-600 hover:text-yellow-800'
+                  : 'text-red-600 hover:text-red-800'
+              }`}
+            >
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
       )}
 
-      {/* Camera Modal */}
+      <div className="max-w-7xl mx-auto p-4">
+        {activePage === 'statistics' ? (
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-6">Exhibition Statistics</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                <p className="text-sm text-blue-600 font-medium mb-1">Total Contacts</p>
+                <p className="text-3xl font-bold text-blue-700">{stats.total}</p>
+              </div>
+              <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                <p className="text-sm text-green-600 font-medium mb-1">High Priority</p>
+                <p className="text-3xl font-bold text-green-700">{stats.highPriority}</p>
+              </div>
+              <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                <p className="text-sm text-purple-600 font-medium mb-1">Sales People</p>
+                <p className="text-3xl font-bold text-purple-700">{Object.keys(stats.bySalesperson).length}</p>
+              </div>
+            </div>
+
+            {Object.keys(stats.bySalesperson).length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-md font-semibold text-gray-800 mb-4">Contacts by Salesperson</h3>
+                <div className="space-y-3">
+                  {Object.entries(stats.bySalesperson).map(([email, count]) => (
+                    <div key={email} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <span className="text-sm font-medium text-gray-700">{email}</span>
+                      <span className="text-lg font-bold text-blue-600">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {Object.keys(stats.byBusinessType).length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-md font-semibold text-gray-800 mb-4">Contacts by Business Type</h3>
+                <div className="space-y-3">
+                  {Object.entries(stats.byBusinessType).map(([type, count]) => (
+                    <div key={type} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                      <span className="text-sm font-medium text-gray-700 capitalize">{type}</span>
+                      <span className="text-lg font-bold text-indigo-600">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="pt-6 border-t">
+              <button
+                onClick={() => exportToCSV(contacts)}
+                className="w-full bg-green-600 text-white py-3 rounded-lg font-medium hover:bg-green-700 transition flex items-center justify-center gap-2"
+              >
+                <Download className="w-5 h-5" />
+                Export All Contacts to CSV
+              </button>
+            </div>
+          </div>
+        ) : activePage === 'contacts' ? (
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-gray-800">
+                Saved Contacts ({filteredContacts.length})
+              </h3>
+              {contacts.length > 0 && (
+                <button
+                  onClick={() => exportToCSV(filteredContacts)}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition text-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Export
+                </button>
+              )}
+            </div>
+
+            {contacts.length === 0 ? (
+              <div className="text-center py-12">
+                <User className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500 text-lg mb-2">No contacts yet</p>
+                <p className="text-gray-400 text-sm mb-4">Start by creating your first contact</p>
+                <button
+                  onClick={() => setActivePage('new-contact')}
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
+                >
+                  Create New Contact
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="mb-4 space-y-3">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <input
+                      type="text"
+                      placeholder="Search by name, company, email, or phone..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <select
+                      value={filterType}
+                      onChange={(e) => setFilterType(e.target.value)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All Business Types</option>
+                      <option value="apartments">Apartments</option>
+                      <option value="airbnbs">Airbnbs</option>
+                      <option value="hotels">Hotels</option>
+                      <option value="cafe-restaurant">Cafe/Restaurant</option>
+                    </select>
+
+                    <select
+                      value={filterPriority}
+                      onChange={(e) => setFilterPriority(e.target.value)}
+                      className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="all">All Priorities</option>
+                      <option value="8-10">High Priority (8-10)</option>
+                      <option value="5-7">Medium Priority (5-7)</option>
+                      <option value="1-4">Low Priority (1-4)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {filteredContacts.length === 0 ? (
+                  <div className="text-center py-12">
+                    <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-500 text-lg mb-2">No contacts found</p>
+                    <p className="text-gray-400 text-sm">Try adjusting your search or filters</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {filteredContacts.map((contact) => (
+                      <div key={contact.id} className="border border-gray-200 rounded-lg">
+                        <div 
+                          className="p-4 hover:bg-gray-50 cursor-pointer"
+                          onClick={() => setExpandedContact(expandedContact === contact.id ? null : contact.id)}
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-semibold text-gray-800">{contact.name}</h4>
+                                {contact.products && contact.products.length > 0 && (
+                                  <span className="text-xs bg-purple-100 text-purple-600 px-2 py-1 rounded">
+                                    {contact.products.length} product{contact.products.length > 1 ? 's' : ''}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-sm text-gray-600">{contact.company}</p>
+                              <p className="text-sm text-gray-500 mt-1">
+                                {contact.businessType} • Priority: {contact.priority}/10
+                              </p>
+                              {contact.email && (
+                                <p className="text-sm text-gray-600 mt-1">{contact.email}</p>
+                              )}
+                              {contact.phone && (
+                                <p className="text-sm text-gray-600">{contact.phone}</p>
+                              )}
+                              <p className="text-xs text-gray-400 mt-2">
+                                By: {contact.salesPerson}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 ml-4">
+                              {expandedContact === contact.id ? (
+                                <ChevronUp className="w-5 h-5 text-gray-400" />
+                              ) : (
+                                <ChevronDown className="w-5 h-5 text-gray-400" />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {expandedContact === contact.id && (
+                          <div className="border-t p-4 bg-gray-50">
+                            <div className="flex gap-2 mb-4">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditContact(contact);
+                                }}
+                                className="flex-1 bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                                Edit
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  shareWithBackoffice(contact);
+                                }}
+                                className="flex-1 bg-green-600 text-white py-2 rounded-lg hover:bg-green-700 transition flex items-center justify-center gap-2"
+                              >
+                                <Share2 className="w-4 h-4" />
+                                Share
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteContact(contact.id);
+                                }}
+                                className="flex-1 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700 transition flex items-center justify-center gap-2"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                Delete
+                              </button>
+                            </div>
+
+                            {contact.notes && (
+                              <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                                <h5 className="text-sm font-semibold text-gray-700 mb-1">Notes</h5>
+                                <p className="text-sm text-gray-600">{contact.notes}</p>
+                              </div>
+                            )}
+
+                            {contact.products && contact.products.length > 0 && (
+                              <div className="mb-4">
+                                <h5 className="text-sm font-semibold text-gray-700 mb-3">Products of Interest</h5>
+                                <div className="space-y-2">
+                                  {contact.products.map((product, idx) => (
+                                    <div key={product.id} className="bg-white border border-gray-200 rounded p-3">
+                                      <div className="flex items-center gap-2 mb-1">
+                                        <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded uppercase">
+                                          {product.productType}
+                                        </span>
+                                        {product.pieces && (
+                                          <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded">
+                                            Qty: {product.pieces}
+                                          </span>
+                                        )}
+                                        {product.photos && product.photos.length > 0 && (
+                                          <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded">
+                                            {product.photos.length} photo{product.photos.length > 1 ? 's' : ''}
+                                          </span>
+                                        )}
+                                      </div>
+                                      {product.productName ? (
+                                        <p className="font-medium text-gray-800">{product.productName}</p>
+                                      ) : (
+                                        <p className="font-medium text-gray-500 italic">Photo only - name to be identified</p>
+                                      )}
+                                      {product.color && (
+                                        <p className="text-sm text-gray-600">Color: {product.color}</p>
+                                      )}
+                                      {product.details && (
+                                        <p className="text-sm text-gray-500 mt-1">{product.details}</p>
+                                      )}
+                                      {product.photos && product.photos.length > 0 && (
+                                        <div className="mt-2 flex gap-1 flex-wrap">
+                                          {product.photos.map((photo, photoIdx) => (
+                                            <img key={photoIdx} src={photo} alt={`Product ${photoIdx + 1}`} className="w-20 h-20 object-cover rounded border border-gray-300" />
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          /* New Contact Form - keeping exact same structure */
+          <div className="bg-white rounded-lg shadow-sm p-6">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">
+              {editingContact ? 'Edit Contact' : 'New Contact'}
+            </h2>
+            
+            {editingContact && (
+              <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex justify-between items-center">
+                <div>
+                  <span className="text-sm font-medium text-yellow-800">Editing: {editingContact.name}</span>
+                  <p className="text-xs text-yellow-600 mt-1">Make your changes and click "Update Contact" to save</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditingContact(null);
+                    setContactForm({
+                      name: '',
+                      priority: 5,
+                      email: '',
+                      phone: '',
+                      company: '',
+                      businessType: 'apartments',
+                      products: [],
+                      notes: '',
+                      timestamp: '',
+                      salesPerson: ''
+                    });
+                    showNotification('Edit cancelled', 'success');
+                  }}
+                  className="px-4 py-2 text-sm bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+            <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-200">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+                <Camera className="w-4 h-4" />
+                Quick Scan
+              </h3>
+              <button
+                onClick={() => startCamera('card')}
+                className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition flex items-center justify-center gap-2"
+              >
+                <Camera className="w-5 h-5" />
+                Scan Business Card
+              </button>
+              <p className="text-xs text-gray-600 mt-2 text-center">
+                Take a photo of the business card, then fill in the details below
+              </p>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Contact Name *
+                </label>
+                <input
+                  type="text"
+                  value={contactForm.name}
+                  onChange={(e) => setContactForm({...contactForm, name: e.target.value})}
+                  className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 ${
+                    contactForm.name.trim() === '' && contactForm.name !== '' 
+                      ? 'border-red-300 bg-red-50' 
+                      : 'border-gray-300'
+                  }`}
+                  placeholder="Required"
+                />
+                {contactForm.name.trim() === '' && contactForm.name !== '' && (
+                  <p className="text-xs text-red-600 mt-1">Contact name cannot be empty</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Customer Priority: {contactForm.priority}
+                </label>
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={contactForm.priority}
+                  onChange={(e) => setContactForm({...contactForm, priority: parseInt(e.target.value)})}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>Low (1)</span>
+                  <span>High (10)</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={contactForm.email}
+                    onChange={(e) => setContactForm({...contactForm, email: e.target.value})}
+                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 ${
+                      contactForm.email && !contactForm.email.includes('@')
+                        ? 'border-yellow-300 bg-yellow-50 focus:ring-yellow-500'
+                        : 'border-gray-300 focus:ring-blue-500'
+                    }`}
+                    placeholder="name@company.com"
+                  />
+                  {contactForm.email && !contactForm.email.includes('@') && (
+                    <p className="text-xs text-yellow-600 mt-1 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      Please enter a valid email address
+                    </p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Telephone
+                  </label>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    value={contactForm.phone}
+                    onChange={(e) => setContactForm({...contactForm, phone: e.target.value})}
+                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 ${
+                      contactForm.phone && contactForm.phone.replace(/\D/g, '').length > 0 && contactForm.phone.replace(/\D/g, '').length !== 10
+                        ? 'border-red-300 bg-red-50 focus:ring-red-500'
+                        : contactForm.phone && contactForm.phone.replace(/\D/g, '').length === 10
+                        ? 'border-green-300 bg-green-50 focus:ring-green-500'
+                        : 'border-gray-300 focus:ring-blue-500'
+                    }`}
+                    placeholder="10 digits required"
+                  />
+                  {contactForm.phone && (
+                    <div className="flex items-center gap-2 mt-1">
+                      {contactForm.phone.replace(/\D/g, '').length === 10 ? (
+                        <CheckCircle className="w-4 h-4 text-green-600" />
+                      ) : contactForm.phone.replace(/\D/g, '').length > 0 ? (
+                        <AlertCircle className="w-4 h-4 text-red-600" />
+                      ) : null}
+                      <p className={`text-xs ${
+                        contactForm.phone.replace(/\D/g, '').length === 10 
+                          ? 'text-green-600' 
+                          : contactForm.phone.replace(/\D/g, '').length > 0
+                          ? 'text-red-600'
+                          : 'text-gray-500'
+                      }`}>
+                        {contactForm.phone.replace(/\D/g, '').length} / 10 digits
+                        {contactForm.phone.replace(/\D/g, '').length > 0 && contactForm.phone.replace(/\D/g, '').length !== 10 && 
+                          ' - Must be exactly 10 digits'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Company Title
+                </label>
+                <input
+                  type="text"
+                  value={contactForm.company}
+                  onChange={(e) => setContactForm({...contactForm, company: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Business Type
+                </label>
+                <select
+                  value={contactForm.businessType}
+                  onChange={(e) => setContactForm({...contactForm, businessType: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="apartments">Apartments</option>
+                  <option value="airbnbs">Airbnbs</option>
+                  <option value="hotels">Hotels</option>
+                  <option value="cafe-restaurant">Cafe/Restaurant</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Notes
+                </label>
+                <textarea
+                  value={contactForm.notes}
+                  onChange={(e) => setContactForm({...contactForm, notes: e.target.value})}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                  rows="3"
+                  placeholder="General notes about the contact or conversation..."
+                />
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="text-md font-semibold text-gray-800 mb-4">Products of Interest</h3>
+                
+                <div className="space-y-3 mb-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Product Type *
+                    </label>
+                    <select
+                      value={productForm.productType}
+                      onChange={(e) => setProductForm({...productForm, productType: e.target.value, customProductType: ''})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="chair">Chair</option>
+                      <option value="armchair">Armchair</option>
+                      <option value="sofa">Sofa</option>
+                      <option value="table">Table</option>
+                      <option value="side table">Side Table</option>
+                      <option value="sunlounger">Sunlounger</option>
+                      <option value="umbrella">Umbrella</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+
+                  {productForm.productType === 'other' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Custom Product Type *
+                      </label>
+                      <input
+                        type="text"
+                        value={productForm.customProductType}
+                        onChange={(e) => setProductForm({...productForm, customProductType: e.target.value})}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                        placeholder="Enter product type"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Product Name
+                    </label>
+                    <input
+                      type="text"
+                      value={productForm.productName}
+                      onChange={(e) => setProductForm({...productForm, productName: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., Model XL-200 (or take a photo)"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">
+                      Enter product name OR take a photo (at least one required)
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Product Photo
+                    </label>
+                    <button
+                      type="button"
+                      onClick={startCamera}
+                      className="flex items-center gap-2 px-4 py-2 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition"
+                    >
+                      <Camera className="w-4 h-4" />
+                      Take Product Photo
+                    </button>
+                    
+                    {productForm.photos.length > 0 && (
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        {productForm.photos.map((photo, idx) => (
+                          <div key={idx} className="relative">
+                            <img src={photo} alt={`Product ${idx + 1}`} className="w-full h-24 object-cover rounded border-2 border-indigo-200" />
+                            <button
+                              type="button"
+                              onClick={() => removePhoto(idx)}
+                              className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full hover:bg-red-600"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Color
+                    </label>
+                    <input
+                      type="text"
+                      value={productForm.color}
+                      onChange={(e) => setProductForm({...productForm, color: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., Navy Blue"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Pieces (Quantity)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={productForm.pieces}
+                      onChange={(e) => setProductForm({...productForm, pieces: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., 5"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Details
+                    </label>
+                    <textarea
+                      value={productForm.details}
+                      onChange={(e) => setProductForm({...productForm, details: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                      rows="2"
+                      placeholder="Additional notes or specifications"
+                    />
+                  </div>
+
+                  <button
+                    onClick={handleAddProductToContact}
+                    className="w-full bg-indigo-600 text-white py-2 rounded-lg font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2"
+                  >
+                    {editingProduct !== null ? (
+                      <>
+                        <Save className="w-4 h-4" />
+                        Update Product
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-4 h-4" />
+                        Add Product
+                      </>
+                    )}
+                  </button>
+                  
+                  {editingProduct !== null && (
+                    <button
+                      onClick={() => {
+                        setEditingProduct(null);
+                        setProductForm({ 
+                          productType: 'chair',
+                          customProductType: '',
+                          productName: '', 
+                          color: '',
+                          pieces: '',
+                          details: '',
+                          photos: []
+                        });
+                      }}
+                      className="w-full border border-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-50 transition"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+
+                {contactForm.products.length > 0 && (
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <h4 className="text-sm font-medium text-gray-700 mb-3">
+                      Products Added ({contactForm.products.length})
+                    </h4>
+                    <div className="space-y-2">
+                      {contactForm.products.map((product, idx) => (
+                        <div key={product.id} className="bg-white border border-gray-200 rounded p-3 flex justify-between items-start">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded uppercase">
+                                {product.productType}
+                              </span>
+                              {product.pieces && (
+                                <span className="text-xs font-medium text-green-600 bg-green-50 px-2 py-1 rounded">
+                                  Qty: {product.pieces}
+                                </span>
+                              )}
+                              {product.photos && product.photos.length > 0 && (
+                                <span className="text-xs font-medium text-purple-600 bg-purple-50 px-2 py-1 rounded">
+                                  {product.photos.length} photo{product.photos.length > 1 ? 's' : ''}
+                                </span>
+                              )}
+                            </div>
+                            {product.productName ? (
+                              <p className="font-medium text-gray-800">{product.productName}</p>
+                            ) : (
+                              <p className="font-medium text-gray-500 italic">Photo only - name to be identified</p>
+                            )}
+                            {product.color && (
+                              <p className="text-sm text-gray-600">Color: {product.color}</p>
+                            )}
+                            {product.details && (
+                              <p className="text-sm text-gray-500 mt-1">{product.details}</p>
+                            )}
+                            {product.photos && product.photos.length > 0 && (
+                              <div className="mt-2 flex gap-1">
+                                {product.photos.map((photo, photoIdx) => (
+                                  <img key={photoIdx} src={photo} alt={`Product ${photoIdx + 1}`} className="w-16 h-16 object-cover rounded border border-gray-300" />
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex gap-1 ml-2">
+                            <button
+                              onClick={() => handleEditProduct(idx)}
+                              className="p-1 text-blue-600 hover:bg-blue-50 rounded"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteProduct(idx)}
+                              className="p-1 text-red-600 hover:bg-red-50 rounded"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={handleContactSubmit}
+                disabled={
+                  !contactForm.name.trim() || 
+                  (contactForm.phone && contactForm.phone.replace(/\D/g, '').length > 0 && contactForm.phone.replace(/\D/g, '').length !== 10)
+                }
+                className={`w-full py-3 rounded-lg font-medium transition flex items-center justify-center gap-2 ${
+                  !contactForm.name.trim() || 
+                  (contactForm.phone && contactForm.phone.replace(/\D/g, '').length > 0 && contactForm.phone.replace(/\D/g, '').length !== 10)
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                <Save className="w-4 h-4" />
+                {editingContact ? 'Update Contact' : 'Save Contact'}
+              </button>
+              {(!contactForm.name.trim() || 
+                (contactForm.phone && contactForm.phone.replace(/\D/g, '').length > 0 && contactForm.phone.replace(/\D/g, '').length !== 10)) && (
+                <p className="text-xs text-gray-500 text-center mt-2">
+                  Please fix validation errors before saving
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {showCamera && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.9)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div style={{ background: 'white', borderRadius: '12px', padding: '20px', maxWidth: '600px', width: '100%' }}>
-            <h3 style={{ marginBottom: '15px', fontSize: '18px' }}>
-              {captureMode === 'business-card' ? '📇 Capture Business Card' : '📷 Capture Product Photo'}
-            </h3>
-            <video ref={videoRef} autoPlay playsInline style={{ width: '100%', borderRadius: '8px', marginBottom: '15px' }} />
-            <div style={{ display: 'flex', gap: '10px' }}>
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-4 w-full max-w-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Take Product Photo</h3>
               <button
                 onClick={stopCamera}
-                style={{ flex: 1, padding: '12px', background: '#6b7280', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '500' }}
+                className="p-2 hover:bg-gray-100 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 mb-4">
+              <p className="text-sm text-indigo-800">
+                Take a clear photo of the product. You can identify the product name later from the photo.
+              </p>
+            </div>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              className="w-full rounded-lg mb-4"
+            />
+            <canvas ref={canvasRef} className="hidden" />
+            <button
+              onClick={capturePhoto}
+              className="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition flex items-center justify-center gap-2"
+            >
+              <Camera className="w-5 h-5" />
+              Capture Product Photo
+            </button>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex items-start gap-4 mb-6">
+              <div className="bg-red-100 rounded-full p-3">
+                <AlertCircle className="w-6 h-6 text-red-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Delete Contact</h3>
+                <p className="text-gray-600">
+                  Are you sure you want to delete <span className="font-semibold">"{deleteConfirm.name}"</span>? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={cancelDelete}
+                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
               >
                 Cancel
               </button>
               <button
-                onClick={capturePhoto}
-                style={{ flex: 2, padding: '12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}
+                onClick={confirmDelete}
+                className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
               >
-                📸 Capture
+                Delete
               </button>
             </div>
           </div>
         </div>
       )}
-
-      <canvas ref={canvasRef} style={{ display: 'none' }} />
     </div>
   );
 }
-
-export default App;
