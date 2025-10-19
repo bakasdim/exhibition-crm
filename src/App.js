@@ -87,13 +87,6 @@ export default function ExhibitionCRM() {
   const checkSession = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
-      // Check if email is verified
-      if (!session.user.email_confirmed_at) {
-        await supabase.auth.signOut();
-        showNotification('Please verify your email before logging in.', 'error');
-        return;
-      }
-      
       // Get user role from metadata (default to 'user' if not set)
       const userRole = session.user.user_metadata?.role || 'user';
       
@@ -103,10 +96,26 @@ export default function ExhibitionCRM() {
         role: userRole
       });
     }
-  }, [showNotification]);
+  }, []);
 
   useEffect(() => {
     checkSession();
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        const userRole = session.user.user_metadata?.role || 'user';
+        setCurrentUser({ 
+          email: session.user.email, 
+          id: session.user.id,
+          role: userRole
+        });
+      } else {
+        setCurrentUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, [checkSession]);
 
   // Load contacts from Supabase when user logs in
@@ -1215,7 +1224,7 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
             )}
           </div>
         ) : (
-          /* New Contact Form - EXACT same as before, just keeping it all here */
+          /* New Contact Form */
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h2 className="text-lg font-bold text-gray-800 mb-4">
               {editingContact ? 'Edit Contact' : 'New Contact'}
