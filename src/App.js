@@ -231,7 +231,7 @@ export default function ExhibitionCRM() {
     if (duplicate && (contactForm.email || contactForm.phone)) {
       const duplicateField = contactForm.email === duplicate.email ? 'email' : 'phone number';
       showNotification(`A contact with this ${duplicateField} already exists: ${duplicate.name}. Please verify the information.`, 'warning');
-      if (!confirm(`Duplicate found: ${duplicate.name} has the same ${duplicateField}. Save anyway?`)) {
+      if (!window.confirm(`Duplicate found: ${duplicate.name} has the same ${duplicateField}. Save anyway?`)) {
         return;
       }
     }
@@ -407,7 +407,7 @@ export default function ExhibitionCRM() {
   };
 
   const handleDeleteProduct = (index) => {
-    if (confirm('Delete this product?')) {
+    if (window.confirm('Delete this product?')) {
       setContactForm({
         ...contactForm,
         products: contactForm.products.filter((_, idx) => idx !== index)
@@ -480,7 +480,7 @@ export default function ExhibitionCRM() {
   };
 
   const handleDeleteSavedContactProduct = (contactId, productIndex) => {
-    if (confirm('Delete this product?')) {
+    if (window.confirm('Delete this product?')) {
       const updatedContacts = contacts.map(c => {
         if (c.id === contactId) {
           return {
