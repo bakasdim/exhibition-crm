@@ -1,5 +1,3 @@
-//this works, but has no auth
-
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Camera, User, LogOut, Save, X, Edit2, Trash2, Plus, ChevronDown, ChevronUp, Download, BarChart3, Search, Share2, CheckCircle, AlertCircle } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
@@ -9,11 +7,12 @@ const SUPABASE_URL = 'https://xgpzjkjcqohebsiyofol.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhncHpqa2pjcW9oZWJzaXlvZm9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MzQ1MDYsImV4cCI6MjA3NjExMDUwNn0.Dlm26WcwP8vu01XlrQ15owcpt3fkhfS0U5R43cUFsgA';
 
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
 export default function ExhibitionCRM() {
   const [currentUser, setCurrentUser] = useState(null);
-  const [loginEmail, setLoginEmail] = useState('');
+  const [authMode, setAuthMode] = useState('login'); // 'login' or 'signup'
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
   const [activePage, setActivePage] = useState('new-contact');
   const [contacts, setContacts] = useState([]);
   const [filteredContacts, setFilteredContacts] = useState([]);
@@ -81,13 +80,17 @@ export default function ExhibitionCRM() {
     return () => document.head.removeChild(style);
   }, []);
 
-  // Load user from localStorage and contacts from Supabase
+  // Check for existing session on mount
   useEffect(() => {
-    const savedUser = localStorage.getItem('crmUser');
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-    }
+    checkSession();
   }, []);
+
+  const checkSession = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      setCurrentUser({ email: session.user.email, id: session.user.id });
+    }
+  };
 
   // Load contacts from Supabase when user logs in
   const loadContactsFromSupabase = useCallback(async () => {
@@ -157,20 +160,61 @@ export default function ExhibitionCRM() {
     applyFilters();
   }, [applyFilters]);
 
-  const handleLogin = () => {
-    if (loginEmail) {
-      const user = { email: loginEmail, loginTime: new Date().toISOString() };
-      setCurrentUser(user);
-      localStorage.setItem('crmUser', JSON.stringify(user));
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setAuthLoading(true);
+
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: authEmail,
+        password: authPassword,
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        showNotification('Account created! Please check your email to verify your account.', 'success');
+        setAuthMode('login');
+        setAuthPassword('');
+      }
+    } catch (error) {
+      showNotification(error.message, 'error');
+    } finally {
+      setAuthLoading(false);
     }
   };
 
-  const handleLogout = () => {
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setAuthLoading(true);
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: authEmail,
+        password: authPassword,
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        setCurrentUser({ email: data.user.email, id: data.user.id });
+        showNotification('Login successful!', 'success');
+      }
+    } catch (error) {
+      showNotification(error.message, 'error');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setCurrentUser(null);
-    localStorage.removeItem('crmUser');
-    setLoginEmail('');
+    setAuthEmail('');
+    setAuthPassword('');
     setContacts([]);
     setFilteredContacts([]);
+    showNotification('Logged out successfully', 'success');
   };
 
   const checkDuplicate = (email, phone, excludeId = null) => {
@@ -558,6 +602,7 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
     return stats;
   };
 
+  // Login/Signup Screen
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
@@ -567,30 +612,74 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
               <User className="w-8 h-8 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-gray-800 mb-2">Exhibition CRM</h1>
-            <p className="text-gray-600">Sign in with your Microsoft 365 account</p>
+            <p className="text-gray-600">
+              {authMode === 'login' ? 'Sign in to your account' : 'Create your account'}
+            </p>
           </div>
           
-          <div className="space-y-4">
+          <form onSubmit={authMode === 'login' ? handleLogin : handleSignup} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Email Address
               </label>
               <input
                 type="email"
-                value={loginEmail}
-                onChange={(e) => setLoginEmail(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="name@company.com"
+                required
               />
             </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Password
+              </label>
+              <input
+                type="password"
+                value={authPassword}
+                onChange={(e) => setAuthPassword(e.target.value)}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder={authMode === 'signup' ? 'Minimum 6 characters' : 'Enter your password'}
+                required
+                minLength={authMode === 'signup' ? 6 : undefined}
+              />
+              {authMode === 'signup' && (
+                <p className="text-xs text-gray-500 mt-1">Password must be at least 6 characters</p>
+              )}
+            </div>
+
             <button
-              onClick={handleLogin}
-              className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition"
+              type="submit"
+              disabled={authLoading}
+              className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed"
             >
-              Sign In
+              {authLoading ? 'Please wait...' : authMode === 'login' ? 'Sign In' : 'Create Account'}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <button
+              onClick={() => {
+                setAuthMode(authMode === 'login' ? 'signup' : 'login');
+                setAuthPassword('');
+              }}
+              className="text-blue-600 hover:text-blue-700 text-sm font-medium"
+            >
+              {authMode === 'login' 
+                ? "Don't have an account? Sign up" 
+                : 'Already have an account? Sign in'}
             </button>
           </div>
+
+          {authMode === 'signup' && (
+            <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="text-xs text-blue-800">
+                After signing up, please check your email to verify your account before logging in.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1002,7 +1091,7 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
             )}
           </div>
         ) : (
-          /* New Contact Form - keeping exact same structure */
+          /* New Contact Form - EXACT same as before, just keeping it all here */
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h2 className="text-lg font-bold text-gray-800 mb-4">
               {editingContact ? 'Edit Contact' : 'New Contact'}
