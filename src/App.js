@@ -163,6 +163,13 @@ export default function ExhibitionCRM() {
 
   const handleSignup = async (e) => {
     e.preventDefault();
+    
+    // Check if email is from bn-group.gr domain
+    if (!authEmail.toLowerCase().endsWith('@bn-group.gr')) {
+      showNotification('Only @bn-group.gr email addresses are allowed to sign up', 'error');
+      return;
+    }
+
     setAuthLoading(true);
 
     try {
@@ -628,9 +635,12 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
                 value={authEmail}
                 onChange={(e) => setAuthEmail(e.target.value)}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="name@company.com"
+                placeholder={authMode === 'signup' ? 'name@bn-group.gr' : 'name@company.com'}
                 required
               />
+              {authMode === 'signup' && (
+                <p className="text-xs text-gray-500 mt-1">Only @bn-group.gr email addresses are allowed</p>
+              )}
             </div>
 
             <div>
