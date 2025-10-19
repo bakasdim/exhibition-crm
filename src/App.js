@@ -1,3 +1,5 @@
+//this works, but has no auth
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Camera, User, LogOut, Save, X, Edit2, Trash2, Plus, ChevronDown, ChevronUp, Download, BarChart3, Search, Share2, CheckCircle, AlertCircle } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
