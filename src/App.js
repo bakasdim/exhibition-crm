@@ -83,11 +83,7 @@ export default function ExhibitionCRM() {
   }, []);
 
   // Check for existing session on mount
-  useEffect(() => {
-    checkSession();
-  }, []);
-
-  const checkSession = async () => {
+  const checkSession = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
       // Check if email is verified
@@ -98,7 +94,11 @@ export default function ExhibitionCRM() {
       }
       setCurrentUser({ email: session.user.email, id: session.user.id });
     }
-  };
+  }, [showNotification]);
+
+  useEffect(() => {
+    checkSession();
+  }, [checkSession]);
 
   // Load contacts from Supabase when user logs in
   const loadContactsFromSupabase = useCallback(async () => {
