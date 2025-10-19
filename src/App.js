@@ -14,6 +14,7 @@ export default function ExhibitionCRM() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
+  const [showResendVerification, setShowResendVerification] = useState(false);
   const [activePage, setActivePage] = useState('new-contact');
   const [contacts, setContacts] = useState([]);
   const [filteredContacts, setFilteredContacts] = useState([]);
@@ -89,6 +90,12 @@ export default function ExhibitionCRM() {
   const checkSession = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session) {
+      // Check if email is verified
+      if (!session.user.email_confirmed_at) {
+        await supabase.auth.signOut();
+        showNotification('Please verify your email before logging in.', 'error');
+        return;
+      }
       setCurrentUser({ email: session.user.email, id: session.user.id });
     }
   };
@@ -181,7 +188,7 @@ export default function ExhibitionCRM() {
       if (error) throw error;
 
       if (data.user) {
-        showNotification('Account created! Please check your email to verify your account.', 'success');
+        showNotification('Account created! Check your email to verify before logging in.', 'success');
         setAuthMode('login');
         setAuthPassword('');
       }
@@ -205,9 +212,41 @@ export default function ExhibitionCRM() {
       if (error) throw error;
 
       if (data.user) {
+        // Check if email is verified
+        if (!data.user.email_confirmed_at) {
+          await supabase.auth.signOut();
+          setShowResendVerification(true);
+          showNotification('Please verify your email before logging in. Check your inbox for the verification link.', 'error');
+          return;
+        }
+
         setCurrentUser({ email: data.user.email, id: data.user.id });
         showNotification('Login successful!', 'success');
       }
+    } catch (error) {
+      showNotification(error.message, 'error');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!authEmail) {
+      showNotification('Please enter your email address', 'error');
+      return;
+    }
+
+    setAuthLoading(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: authEmail,
+      });
+
+      if (error) throw error;
+
+      showNotification('Verification email sent! Please check your inbox.', 'success');
+      setShowResendVerification(false);
     } catch (error) {
       showNotification(error.message, 'error');
     } finally {
@@ -675,6 +714,7 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
               onClick={() => {
                 setAuthMode(authMode === 'login' ? 'signup' : 'login');
                 setAuthPassword('');
+                setShowResendVerification(false);
               }}
               className="text-blue-600 hover:text-blue-700 text-sm font-medium"
             >
@@ -684,10 +724,22 @@ Date: ${new Date(contact.timestamp).toLocaleString()}
             </button>
           </div>
 
+          {showResendVerification && authMode === 'login' && (
+            <div className="mt-4">
+              <button
+                onClick={handleResendVerification}
+                disabled={authLoading}
+                className="w-full bg-green-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition disabled:bg-gray-400"
+              >
+                {authLoading ? 'Sending...' : 'Resend Verification Email'}
+              </button>
+            </div>
+          )}
+
           {authMode === 'signup' && (
             <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
               <p className="text-xs text-blue-800">
-                After signing up, please check your email to verify your account before logging in.
+                <strong>Important:</strong> After signing up, you must verify your email before you can log in. Check your inbox for the verification link.
               </p>
             </div>
           )}
