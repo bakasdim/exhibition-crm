@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Camera, User, LogOut, Save, X, Edit2, Trash2, Plus, ChevronDown, ChevronUp, Download, BarChart3, Search, Share2, CheckCircle, AlertCircle } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 
-// ⚠️ REPLACE WITH YOUR SUPABASE CREDENTIALS
-const SUPABASE_URL = 'https://xgpzjkjcqohebsiyofol.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhncHpqa2pjcW9oZWJzaXlvZm9sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA1MzQ1MDYsImV4cCI6MjA3NjExMDUwNn0.Dlm26WcwP8vu01XlrQ15owcpt3fkhfS0U5R43cUFsgA';
+// Read from environment variables
+const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export default function ExhibitionCRM() {
   const [currentUser, setCurrentUser] = useState(null);
